@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tower Tap</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: linear-gradient(to bottom, #0c0032, #1a1a40, #4b0082);
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    .container {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+
+    #nameBox, #hud, #leaderboard, #controls, #creditBox {
+      position: absolute;
+      background: rgba(255,255,255,0.85);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 16px;
+      z-index: 10;
+    }
+
+    #creditBox {
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    #nameBox {
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    #playerName {
+      padding: 5px;
+      font-size: 16px;
+      width: 160px;
+    }
+
+    #leaderboard {
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 240px;
+    }
+
+    #hud {
+      top: 150px;
+      left: 10%;
+      transform: translateX(-50%);
+      font-size: 15px;
+    }
+
+    #controls {
+      bottom: 10px;
+      right: 10px;
+    }
+
+    button {
+      padding: 5px 10px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    ol {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 14px;
+    }
+
+    h3 {
+      margin: 0 0 5px;
+      font-size: 16px;
+      text-align: center;
+    }
+
+    .dew {
+      position: absolute;
+      top: -20px;
+      width: 2px;
+      height: 20px;
+      background: white;
+      opacity: 0.2;
+      animation: fall linear infinite;
+    }
+
+    @keyframes fall {
+      to {
+        transform: translateY(100vh);
+      }
+    }
+
+    .flash {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      animation: flash 10s infinite;
+      pointer-events: none;
+    }
+
+    @keyframes flash {
+      0%, 95%, 100% { background-color: transparent; }
+      96%, 98% { background-color: rgba(255,255,255,0.1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="flash"></div>
+    <canvas id="game"></canvas>
+
+    <div id="creditBox">
+      Developed By: <strong>S A Rashel</strong><br />
+      Madina Digital Developer
+    </div>
+
+    <div id="nameBox">
+      👤 <input type="text" id="playerName" placeholder="Your Name" maxlength="12" />
+    </div>
+
+    <div id="leaderboard">
+      <h3>🏆 Leaderboard</h3>
+      <ol id="scoresList"></ol>
+    </div>
+
+    <div id="hud">Score: 0 | Level: 1</div>
+
+    <div id="controls">
+      <button id="muteBtn">🔊</button>
+    </div>
+
+    <!-- Audio -->
+    <audio id="drop" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+    <audio id="gameover" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
+    <audio id="bgMusic" src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" loop></audio>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const blockHeight = 30;
+    const colors = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"];
+    let stack = [];
+    let currentBlock = null;
+    let speed = 3;
+    let score = 0;
+    let level = 1;
+    let isGameOver = false;
+    let animationId = null;
+    let cameraOffsetY = 0;
+    let muted = false;
+
+    const hud = document.getElementById("hud");
+    const dropSound = document.getElementById("drop");
+    const gameoverSound = document.getElementById("gameover");
+    const bgMusic = document.getElementById("bgMusic");
+    const muteBtn = document.getElementById("muteBtn");
+    const nameInput = document.getElementById("playerName");
+
+    function resizeCanvas() {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+    }
+
+    function updateHUD() {
+      hud.textContent = `Score: ${score} | Level: ${level}`;
+    }
+
+    function getRandomColor() {
+      return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    function newBlock() {
+      const last = stack[stack.length - 1];
+      currentBlock = {
+        x: canvas.width / 2 - last.width / 2,
+        y: last.y - blockHeight,
+        width: last.width,
+        dir: 1,
+        color: getRandomColor()
+      };
+    }
+
+    function drawBlock(b) {
+      ctx.fillStyle = b.color;
+      ctx.fillRect(b.x, b.y + cameraOffsetY, b.width, blockHeight);
+    }
+
+    function dropBlock() {
+      if (!currentBlock || isGameOver) return;
+      if (!muted) {
+        dropSound.currentTime = 0;
+        dropSound.play().catch(() => {});
+      }
+
+      const last = stack[stack.length - 1];
+      const overlap = Math.min(currentBlock.x + currentBlock.width, last.x + last.width) -
+                      Math.max(currentBlock.x, last.x);
+
+      if (overlap > 0) {
+        currentBlock.width = overlap;
+        currentBlock.x = Math.max(currentBlock.x, last.x);
+        currentBlock.y = last.y - blockHeight;
+        stack.push(currentBlock);
+        score++;
+        if (score % 10 === 0) {
+          level++;
+          speed += 0.5;
+        }
+        updateHUD();
+        newBlock();
+        cameraOffsetY = canvas.height - blockHeight * 2 - stack[stack.length - 1].y;
+      } else {
+        isGameOver = true;
+        if (!muted) gameoverSound.play().catch(() => {});
+        saveScore(score, level, nameInput.value || "Unknown");
+        updateLeaderboard();
+        cancelAnimationFrame(animationId);
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      stack.forEach(drawBlock);
+      if (currentBlock) {
+        currentBlock.x += currentBlock.dir * speed;
+        if (currentBlock.x < 0 || currentBlock.x + currentBlock.width > canvas.width) {
+          currentBlock.dir *= -1;
+        }
+        drawBlock(currentBlock);
+      }
+      if (!isGameOver) {
+        animationId = requestAnimationFrame(animate);
+      }
+    }
+
+    function init() {
+      resizeCanvas();
+      stack = [{
+        x: canvas.width / 2 - 100,
+        y: canvas.height - blockHeight,
+        width: 200,
+        color: getRandomColor()
+      }];
+      score = 0;
+      level = 1;
+      speed = 3;
+      isGameOver = false;
+      cameraOffsetY = 0;
+      updateHUD();
+      newBlock();
+      animate();
+    }
+
+    function startGame() {
+      if (!bgMusic.played.length && !muted) {
+        bgMusic.play().catch(() => {});
+      }
+      if (isGameOver) init();
+      else dropBlock();
+    }
+
+    function saveScore(score, level, name) {
+      const entry = { name, score, level };
+      let scores = JSON.parse(localStorage.getItem("towerTapScores") || "[]");
+      scores.push(entry);
+      scores.sort((a, b) => b.score - a.score);
+      scores = scores.slice(0, 5);
+      localStorage.setItem("towerTapScores", JSON.stringify(scores));
+    }
+
+    function updateLeaderboard() {
+      const scores = JSON.parse(localStorage.getItem("towerTapScores") || "[]");
+      const list = document.getElementById("scoresList");
+      list.innerHTML = scores.map(s => `<li>${s.name}: ${s.score} (Lvl ${s.level})</li>`).join("");
+    }
+
+    function toggleMute(e) {
+      e.stopPropagation();
+      muted = !muted;
+      muteBtn.textContent = muted ? "🔇" : "🔊";
+      bgMusic.muted = muted;
+    }
+
+    muteBtn.addEventListener("click", toggleMute);
+    window.addEventListener("keydown", e => { if (e.code === "Space") startGame(); });
+    window.addEventListener("mousedown", e => {
+      if (e.target.id !== "muteBtn") startGame();
+    });
+    window.addEventListener("touchstart", e => {
+      if (e.target.id !== "muteBtn") startGame();
+    });
+    window.addEventListener("resize", resizeCanvas);
+
+    function spawnDew() {
+      const drop = document.createElement("div");
+      drop.className = "dew";
+      drop.style.left = Math.random() * window.innerWidth + "px";
+      drop.style.animationDuration = (Math.random() * 2 + 1) + "s";
+      document.body.appendChild(drop);
+      setTimeout(() => document.body.removeChild(drop), 3000);
+    }
+
+    setInterval(spawnDew, 150);
+
+    init();
+    updateLeaderboard();
+  </script>
+</body>
+</html>
